@@ -1,19 +1,22 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Align where
 
--- import Text.Parsec
--- import Control.Applicative
-import Data.Text (Text)
-import Data.String (IsString)
-import qualified Data.Text as T
-import qualified Data.Map as M
-import Data.Map (Map)
-import qualified Data.List as L
-import Data.Monoid
+-- import           Control.Applicative
+import qualified Data.List            as L
+import           Data.Map             (Map)
+import qualified Data.Map             as M
+import           Data.Monoid
+import           Data.String          (IsString)
+import           Data.Text            (Text)
+import qualified Data.Text            as T
+import           Data.Void
+import           Text.Megaparsec
+import           Text.Megaparsec.Char
 
 tailSafe :: [a] -> [a]
-tailSafe [] = []
+tailSafe []     = []
 tailSafe (_:xs) = xs
+
 
 newtype Separator = Separator {unSeparator :: Text}
     deriving (Show, IsString)
@@ -48,8 +51,7 @@ columnSizes = fmap snd
 colSize :: Columns -> Map ColNr Offset
 colSize = M.fromList
         . zipWith (\nr o -> (ColNr nr, Offset o)) [1..]
---        . flip mappend [0]       -- count the last column
-        . fmap T.length -- Length
+        . fmap T.length
         . unColumns
 
 alignColumns :: Separator -> [Offset] -> Columns -> Text
@@ -59,3 +61,27 @@ alignColumns (Separator sep) offsets (Columns cols) =
         combine :: Offset -> Text -> Text
         combine (Offset o) t = t <> T.pack (take (o - T.length t) (repeat ' '))
 
+
+------------ megaparsec stuffs ------------
+
+data Stuff = Whatever Text | Delim Text deriving (Show, Eq, Ord)
+
+lineParser :: [Separator] -> Parsec Void Text [Stuff]
+lineParser ss = many
+              . foldl1 (<|>)
+              $ fmap (try . delimP) ss <> [try $ textChunk ss] -- , afterLast]
+
+delimP :: Separator -> Parsec Void Text Stuff
+delimP = fmap Delim . string' . unSeparator
+
+textChunk :: [Separator] -> Parsec Void Text Stuff
+textChunk ss = fmap (Whatever . T.pack) $  manyTill anyChar findDelim
+    where
+        findDelim = lookAhead . foldl1 (<|>) $ fmap delimP ss <> []
+
+afterLast :: Parsec Void Text Stuff
+afterLast = Whatever <$> takeRest
+
+
+-- Adding afterLast to lineParsers makes the parser infinite :(
+-- > parse (lineParser [Separator "->"]) "" ".a.b ->c.hejsan->hej"
