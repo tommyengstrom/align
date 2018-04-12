@@ -78,3 +78,4 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - align
+    - hspec

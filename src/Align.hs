@@ -3,9 +3,6 @@ module Align where
 
 -- import           Control.Applicative
 import           Data.Either
-import qualified Data.List            as L
-import           Data.Map             (Map)
-import qualified Data.Map             as M
 import           Data.Maybe
 import           Data.Monoid
 import           Data.String          (IsString)
@@ -19,121 +16,94 @@ import           Text.Megaparsec.Char
 newtype Separator = Separator {unSeparator :: Text}
     deriving (Show, IsString)
 
-newtype ColNr = ColNr Int
-    deriving (Show, Eq, Ord)
-
-newtype Offset = Offset Int
+newtype Offset = Offset {unOffset :: Int}
     deriving (Show, Eq, Ord, Num)
 
-newtype RowOffsets = RowOffsets [Offset]
-    deriving (Show, Eq, Ord)
+data Piece = TextBlock Text
+           | Delim Text
+           deriving (Show, Eq, Ord)
 
-newtype Columns = Columns { unColumns :: [Text]}
-
-align :: Separator -> [Text] -> [Text]
-align sep ts = fmap (alignColumns sep offsets) cols
-    where
-        cols :: [Columns]
-        cols = fmap (getColumns sep) ts
-
-        offsets :: [Offset]
-        offsets = columnSizes cols
-
-getColumns :: Separator -> Text -> Columns
-getColumns sep = Columns . T.splitOn (unSeparator sep)
-
-columnSizes :: [Columns] -> [Offset]
-columnSizes = fmap snd
-            . L.sort
-            . M.toList
-            . M.unionsWith max
-            . fmap colSize
-
-colSize :: Columns -> Map ColNr Offset
-colSize = M.fromList
-        . zipWith (\nr o -> (ColNr nr, Offset o)) [1..]
-        . fmap T.length
-        . unColumns
-
-alignColumns :: Separator -> [Offset] -> Columns -> Text
-alignColumns (Separator sep) offsets (Columns cols) =
-    T.intercalate sep $ zipWith combine offsets cols
-    where
-        combine :: Offset -> Text -> Text
-        combine (Offset o) t = t <> T.pack (take (o - T.length t) (repeat ' '))
-
-
------------- megaparsec stuffs ------------
-
-data Stuff = Whatever Text | Delim Text deriving (Show, Eq, Ord)
-
-lineParser :: [Separator] -> Parsec Void Text [Stuff]
+lineParser :: [Separator] -> Parsec Void Text [Piece]
 lineParser ss = do
     parts <- many
            . foldl1 (<|>)
            $ fmap (try . delimP) ss <> [try $ textChunk ss]
     lastPart <- afterLast
-    pure $ parts <> [lastPart]
+    pure $ parts <> [lastPart, Delim ""]
 
-delimP :: Separator -> Parsec Void Text Stuff
+delimP :: Separator -> Parsec Void Text Piece
 delimP = fmap Delim . string' . unSeparator
 
-textChunk :: [Separator] -> Parsec Void Text Stuff
-textChunk ss = fmap (Whatever . T.pack) $  manyTill anyChar findDelim
+textChunk :: [Separator] -> Parsec Void Text Piece
+textChunk ss = fmap (TextBlock . T.pack) $  manyTill anyChar findDelim
     where
         findDelim = lookAhead . foldl1 (<|>) $ fmap delimP ss <> []
 
-afterLast :: Parsec Void Text Stuff
-afterLast = Whatever <$> takeRest
+afterLast :: Parsec Void Text Piece
+afterLast = TextBlock <$> takeRest
 
-reconstruct :: [Offset] -> [Stuff] -> Text
-reconstruct offsets = T.concat . f 0 offsets
+reconstruct :: [Offset] -> [Piece] -> Text
+reconstruct offsets = T.stripEnd . T.concat . f 0 offsets
     where
-        f :: Int -> [Offset] -> [Stuff] -> [Text]
+        f :: Int -> [Offset] -> [Piece] -> [Text]
         f _ _ [] = []
-        f _ [] ps = fmap stuffToText ps
-        f pos delimOffsets (Whatever t:ps) = t : f (T.length t + pos) delimOffsets ps
+        f _ [] ps = fmap pieceToText ps
+        f pos delimOffsets (TextBlock t:ps) = t : f (T.length t + pos) delimOffsets ps
         f pos (Offset o:os) (Delim t: ps)   =
             let extraSpaces = o - pos
                 toInsert = T.replicate extraSpaces " " <> t
              in toInsert : f (pos + T.length toInsert) os ps
 
-stuffToText :: Stuff -> Text
-stuffToText (Whatever t) = t
-stuffToText (Delim t)    = t
+pieceToText :: Piece -> Text
+pieceToText (TextBlock t) = t
+pieceToText (Delim t)     = t
 
-delimiterOffsets :: [Stuff] -> [Offset]
+delimiterOffsets :: [Piece] -> [Offset]
 delimiterOffsets = f 0
     where
-        f :: Int -> [Stuff] -> [Offset]
-        f _ []                = []
-        f pos (Whatever t:ss) = f (pos + T.length t) ss
-        f pos (Delim t   :ss) = Offset pos : f (pos + T.length t) ss
+        f :: Int -> [Piece] -> [Offset]
+        f _ []                 = []
+        f pos (TextBlock t:ss) = f (pos + T.length t) ss
+        f pos (Delim t   :ss)  = Offset pos : f (pos + T.length t) ss
 
 maxOffsets :: [[Offset]] -> [Offset]
-maxOffsets = f (Offset 0)
+maxOffsets os = case maxOffset of
+    Just o  -> o : maxOffsets (rest o)
+    Nothing -> []
     where
-        f :: Offset -> [[Offset]] -> [Offset]
-        f _ [] = []
-        f pos (os:oss) =
-            let maxOffset :: Maybe Offset
-                maxOffset = maximumMay . catMaybes $ fmap headMay os
+        advance :: Offset -> [Offset] -> [Offset]
+        advance _ []                = []
+        advance minOffset os'@(o:_) = fmap (+ (minOffset - o)) os'
 
-                apa :: Offset -> [Offset] -> [Offset]
-                apa _ []          = []
-                apa minO os@(o:_) = fmap (+ (minO - o)) os
+        maxOffset :: Maybe Offset
+        maxOffset = maximumMay . catMaybes $ fmap headMay os
 
-             in maybe [] (\o -> o : f o (fmap (apa o) oss)) maxOffset
+        -- Move the rest of the offsets to the right so that all starts on the same column
+        rest :: Offset -> [[Offset]]
+        rest o = filter (not . null) $ fmap (tailSafe . advance o) os
 
-align' :: [Separator] -> [Text] -> [Text]
-align' separators ts = undefined
+align :: [Separator] -> [Text] -> [Text]
+align separators ts = fmap (reconstruct offsets) rows
     where
-        rows :: [[Stuff]]
-        rows = rights $ fmap (parse (lineParser separators) "") ts
+        rows :: [[Piece]]
+        rows = parseRows separators ts
 
-        rowOffsets :: [[Offset]]
-        rowOffsets = fmap delimiterOffsets rows
+        offsets :: [Offset]
+        offsets = maxOffsets $ fmap delimiterOffsets rows
 
+parseRows :: [Separator] -> [Text] -> [[Piece]]
+parseRows separators = rights . fmap (parseRow separators)
 
--- Adding afterLast to lineParsers makes the parser infinite :(
--- > parse (lineParser [Separator "->"]) "" ".a.b ->c.hejsan->hej"
+parseRow :: [Separator] -> Text -> Either (ParseError (Token Text) Void) [Piece]
+parseRow separators = parse (lineParser separators) "parseRow"
+
+reconstructRow :: [Offset] -> [Piece] -> Text
+reconstructRow offsets = T.concat . f (Offset 0) offsets
+    where
+        f :: Offset -> [Offset] -> [Piece] -> [Text]
+        f _ _ [] = []
+        f _ [] l = fmap pieceToText l
+        f pos os (TextBlock t : ss) = t : f (pos + Offset (T.length t)) os ss
+        f pos (o:os) (Delim t: ss) = let new = T.replicate (unOffset $ o - pos) " " <> t
+                                      in new : f (pos + Offset (T.length new)) os ss
+
