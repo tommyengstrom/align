@@ -23,6 +23,15 @@ data Piece = TextBlock Text
            | Delim Text
            deriving (Show, Eq, Ord)
 
+data AlignOptions = AlignOptions
+    { prefix     :: Maybe Text
+    , suffix     :: Maybe Text
+    , separators :: [Separator]
+    } deriving Show
+
+defaultOptions :: [Separator] -> AlignOptions
+defaultOptions = AlignOptions Nothing Nothing
+
 lineParser :: [Separator] -> Parsec Void Text [Piece]
 lineParser ss = do
     parts <- many
@@ -42,16 +51,19 @@ textChunk ss = fmap (TextBlock . T.pack) $  manyTill anyChar findDelim
 afterLast :: Parsec Void Text Piece
 afterLast = TextBlock <$> takeRest
 
-reconstruct :: [Offset] -> [Piece] -> Text
-reconstruct offsets = T.stripEnd . T.concat . f 0 offsets
+reconstruct :: Maybe Text -> Maybe Text -> [Offset] -> [Piece] -> Text
+reconstruct mBefore mAfter offsets = T.stripEnd . T.concat . f 0 offsets
     where
+        after = fromMaybe "" mAfter
+        before = fromMaybe "" mBefore
+
         f :: Int -> [Offset] -> [Piece] -> [Text]
         f _ _ [] = []
         f _ [] ps = fmap pieceToText ps
         f pos delimOffsets (TextBlock t:ps) = t : f (T.length t + pos) delimOffsets ps
         f pos (Offset o:os) (Delim t: ps)   =
             let extraSpaces = o - pos
-                toInsert = T.replicate extraSpaces " " <> t
+                toInsert = T.replicate extraSpaces " " <> before <> t <> after
              in toInsert : f (pos + T.length toInsert) os ps
 
 pieceToText :: Piece -> Text
@@ -82,11 +94,15 @@ maxOffsets os = case maxOffset of
         rest :: Offset -> [[Offset]]
         rest o = filter (not . null) $ fmap (tailSafe . advance o) os
 
+
 align :: [Separator] -> [Text] -> [Text]
-align separators ts = fmap (reconstruct offsets) rows
+align s = alignApa (defaultOptions s)
+
+alignApa :: AlignOptions -> [Text] -> [Text]
+alignApa opts ts = fmap (reconstruct (prefix opts) (suffix opts) offsets) rows
     where
         rows :: [[Piece]]
-        rows = parseRows separators ts
+        rows = parseRows (separators opts) ts
 
         offsets :: [Offset]
         offsets = maxOffsets $ fmap delimiterOffsets rows
@@ -96,14 +112,4 @@ parseRows separators = rights . fmap (parseRow separators)
 
 parseRow :: [Separator] -> Text -> Either (ParseError (Token Text) Void) [Piece]
 parseRow separators = parse (lineParser separators) "parseRow"
-
-reconstructRow :: [Offset] -> [Piece] -> Text
-reconstructRow offsets = T.concat . f (Offset 0) offsets
-    where
-        f :: Offset -> [Offset] -> [Piece] -> [Text]
-        f _ _ [] = []
-        f _ [] l = fmap pieceToText l
-        f pos os (TextBlock t : ss) = t : f (pos + Offset (T.length t)) os ss
-        f pos (o:os) (Delim t: ss) = let new = T.replicate (unOffset $ o - pos) " " <> t
-                                      in new : f (pos + Offset (T.length new)) os ss
 

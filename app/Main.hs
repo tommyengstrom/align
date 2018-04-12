@@ -23,7 +23,12 @@ deriving instance Show (CliParams Unwrapped)
 main :: IO ()
 main = do
     opts <- unwrapRecord "Align" :: IO (CliParams Unwrapped)
-    print opts
+    let alignOpts = AlignOptions
+            { prefix = before opts
+            , suffix = after opts
+            , separators = Separator <$> delimiter opts
+            }
     textLines <- T.lines <$> T.getContents
-    void . traverse T.putStrLn $ align (fmap Separator $ delimiter opts) textLines
+
+    void . traverse T.putStrLn $ alignApa alignOpts textLines
 
