@@ -2,15 +2,22 @@ module Main where
 
 import           Align
 import           Control.Monad
-import qualified Data.Text     as T
-import qualified Data.Text.IO  as T
-import Options.Generic
+import qualified Data.Text       as T
+import qualified Data.Text.IO    as T
+import           Options.Generic
 
 data CliParams w = CliParams
-    { delimiter :: w ::: [Text] <?> "Delimiter to use"
+    { delimiter :: w ::: [Text]     <?> "Delimiter to use"
+    , before    :: w ::: Maybe Text <?> "Test to insert before delimiters"
+    , after     :: w ::: Maybe Text <?> "Test to insert after delimiters"
     } deriving (Generic)
 
-instance ParseRecord (CliParams Wrapped)
+modifiers :: Modifiers
+modifiers = defaultModifiers
+    { shortNameModifier = firstLetter}
+
+instance ParseRecord (CliParams Wrapped) where
+    parseRecord = parseRecordWithModifiers modifiers
 deriving instance Show (CliParams Unwrapped)
 
 main :: IO ()
