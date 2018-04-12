@@ -67,6 +67,7 @@ executables:
     source-dirs:         app
     dependencies:
     - align
+    - optparse-generic
 
 tests:
   align-test:

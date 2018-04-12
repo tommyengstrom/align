@@ -19,3 +19,13 @@ tests = describe "Align.align" $ do
                        , "ab ,fluffer,fak,flu"
                        ]
         align [Separator ","] input `shouldBe` expected
+    it "Hanle multiple separators" $ do
+        let input = [ "hello there sir"
+                    , "a,b,c,d"
+                    , "Now,will this work?"
+                    ]
+            expected = [ "hello there sir"
+                       , "a    ,b    ,c   ,d"
+                       , "Now  ,will  this work?"
+                       ]
+        align [Separator ",", Separator " "] input `shouldBe` expected
