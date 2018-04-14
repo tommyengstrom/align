@@ -54,7 +54,7 @@ afterLast = TextBlock <$> takeRest
 reconstruct :: Maybe Text -> Maybe Text -> [Offset] -> [Piece] -> Text
 reconstruct mBefore mAfter offsets = T.stripEnd . T.concat . f 0 offsets
     where
-        after = fromMaybe "" mAfter
+        after  = fromMaybe "" mAfter
         before = fromMaybe "" mBefore
 
         f :: Int -> [Offset] -> [Piece] -> [Text]
@@ -64,7 +64,7 @@ reconstruct mBefore mAfter offsets = T.stripEnd . T.concat . f 0 offsets
         f pos (Offset o:os) (Delim t: ps)   =
             let extraSpaces = o - pos
                 toInsert = T.replicate extraSpaces " " <> before <> t <> after
-             in toInsert : f (pos + T.length toInsert) os ps
+             in toInsert : f (pos + extraSpaces +1 ) os ps
 
 pieceToText :: Piece -> Text
 pieceToText (TextBlock t) = t

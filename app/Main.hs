@@ -8,8 +8,9 @@ import           Options.Generic
 
 data CliParams w = CliParams
     { delimiter :: w ::: [Text]     <?> "Delimiter to use"
-    , before    :: w ::: Maybe Text <?> "Test to insert before delimiters"
-    , after     :: w ::: Maybe Text <?> "Test to insert after delimiters"
+    , before    :: w ::: Maybe Text <?> "Text to insert before delimiters"
+    , after     :: w ::: Maybe Text <?> "Text to insert after delimiters"
+    , replace   :: w ::: Maybe Text <?> "Text to replace delimiters with"
     } deriving (Generic)
 
 modifiers :: Modifiers
@@ -24,8 +25,8 @@ main :: IO ()
 main = do
     opts <- unwrapRecord "Align" :: IO (CliParams Unwrapped)
     let alignOpts = AlignOptions
-            { prefix = before opts
-            , suffix = after opts
+            { prefix     = before opts
+            , suffix     = after opts
             , separators = Separator <$> delimiter opts
             }
     textLines <- T.lines <$> T.getContents

@@ -29,3 +29,4 @@ tests = describe "Align.align" $ do
                        , "Now  ,will  this work?"
                        ]
         align [Separator ",", Separator " "] input `shouldBe` expected
+
