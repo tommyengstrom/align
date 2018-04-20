@@ -2,6 +2,7 @@
 module Align where
 
 -- import           Control.Applicative
+-- import           Control.Monad
 import           Data.Either
 import           Data.Maybe
 import           Data.Monoid
@@ -24,28 +25,40 @@ data Piece = TextBlock Text
            deriving (Show, Eq, Ord)
 
 data AlignOptions = AlignOptions
-    { prefix     :: Maybe Text
-    , suffix     :: Maybe Text
-    , separators :: [Separator]
+    { prefix      :: Maybe Text
+    , suffix      :: Maybe Text
+    , stripBefore :: Bool
+    , stripAfter  :: Bool
+    , separators  :: [Separator]
     } deriving Show
 
 defaultOptions :: [Separator] -> AlignOptions
-defaultOptions = AlignOptions Nothing Nothing
+defaultOptions = AlignOptions Nothing Nothing False False
 
-lineParser :: [Separator] -> Parsec Void Text [Piece]
-lineParser ss = do
+lineParser :: AlignOptions -> Parsec Void Text [Piece]
+lineParser opts = do
     parts <- many
            . foldl1 (<|>)
-           $ fmap (try . delimP) ss <> [try $ textChunk ss]
+           $ fmap (try . delimP) ss <> [try $ textChunk opts]
     lastPart <- afterLast
-    pure $ parts <> [lastPart, Delim ""]
+    pure . fmap (stripParts opts) $ parts <> [lastPart, Delim ""]
+    where
+        ss = separators opts
+
+stripParts :: AlignOptions -> Piece -> Piece
+stripParts _ p@(Delim _) = p
+stripParts opts (TextBlock t) =
+    TextBlock . (if stripBefore opts then T.stripStart else id)
+              . (if stripAfter opts then T.stripEnd else id)
+              $ t
 
 delimP :: Separator -> Parsec Void Text Piece
 delimP = fmap Delim . string' . unSeparator
 
-textChunk :: [Separator] -> Parsec Void Text Piece
-textChunk ss = fmap (TextBlock . T.pack) $  manyTill anyChar findDelim
+textChunk :: AlignOptions -> Parsec Void Text Piece
+textChunk opts = fmap (TextBlock . T.pack) $ manyTill anyChar findDelim
     where
+        ss = separators opts
         findDelim = lookAhead . foldl1 (<|>) $ fmap delimP ss <> []
 
 afterLast :: Parsec Void Text Piece
@@ -95,21 +108,18 @@ maxOffsets os = case maxOffset of
         rest o = filter (not . null) $ fmap (tailSafe . advance o) os
 
 
-align :: [Separator] -> [Text] -> [Text]
-align s = alignApa (defaultOptions s)
-
-alignApa :: AlignOptions -> [Text] -> [Text]
-alignApa opts ts = fmap (reconstruct (prefix opts) (suffix opts) offsets) rows
+align :: AlignOptions -> [Text] -> [Text]
+align opts ts = fmap (reconstruct (prefix opts) (suffix opts) offsets) rows
     where
         rows :: [[Piece]]
-        rows = parseRows (separators opts) ts
+        rows = parseRows opts ts
 
         offsets :: [Offset]
         offsets = maxOffsets $ fmap delimiterOffsets rows
 
-parseRows :: [Separator] -> [Text] -> [[Piece]]
-parseRows separators = rights . fmap (parseRow separators)
+parseRows :: AlignOptions -> [Text] -> [[Piece]]
+parseRows opts = rights . fmap (parseRow opts)
 
-parseRow :: [Separator] -> Text -> Either (ParseError (Token Text) Void) [Piece]
-parseRow separators = parse (lineParser separators) "parseRow"
+parseRow :: AlignOptions -> Text -> Either (ParseError (Token Text) Void) [Piece]
+parseRow opts = parse (lineParser opts) "parseRow"
 
