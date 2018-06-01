@@ -1,48 +1,54 @@
 module Main where
 
-import qualified Align               as A
-import           Control.Applicative
+import qualified Align           as A
 import           Control.Monad
-import qualified Data.List.NonEmpty  as NE
-import           Data.Maybe
-import qualified Data.Text           as T
-import qualified Data.Text.IO        as T
+import           Data.Char       (isUpper, toLower)
+import qualified Data.Text       as T
+import qualified Data.Text.IO    as T
 import           Options.Generic
 
 data CliParams = CliParams
     { before      :: Maybe Text <?> "Text to insert before delimiters"
     , after       :: Maybe Text <?> "Text to insert after delimiters"
     , replace     :: Maybe Text <?> "Text to replace delimiters with"
-    , stripAfter  :: Maybe Bool <?> "Strip spaces after each block"
-    , stripBefore :: Maybe Bool <?> "Strip spaces before each block"
-    , strip       :: Maybe Bool <?> "Strip spaces before and after each block"
+    , stripAfter  :: Bool       <?> "Strip spaces after each block"
+    , stripBefore :: Bool       <?> "Strip spaces before each block"
+    , strip       :: Bool       <?> "Strip spaces before and after each block"
+    , delimiter   :: [Text]     <?> "Text to separate columns"
     } deriving (Generic)
+
+shortener :: String -> Maybe Char
+shortener "after"     = Just 'a'
+shortener "before"    = Just 'b'
+shortener "delimiter" = Just 'd'
+shortener "replace"   = Just 'r'
+shortener "strip"     = Just 's'
+shortener _           = Nothing
+
+nameModifier :: String -> String
+nameModifier [] = []
+nameModifier (c:cs) | isUpper c = '-' : toLower c : nameModifier cs
+                    | otherwise = c : nameModifier cs
 
 modifiers :: Modifiers
 modifiers = defaultModifiers
-    { shortNameModifier = firstLetter}
+    { shortNameModifier = shortener
+    , fieldNameModifier = nameModifier
+    }
 
 instance ParseRecord CliParams where
     parseRecord = parseRecordWithModifiers modifiers
 deriving instance Show CliParams
 
-
-data Mixed = Mixed (NE.NonEmpty (Text <?> "Separator")) CliParams
-    deriving Generic
-
-instance ParseRecord Mixed where
-    parseRecord = Mixed <$> parseRecord <*> parseRecord
-
 main :: IO ()
 main = do
-    --Mixed seps opts <- (unwrapRecord "Align" :: IO (Mixed Unwrapped))
-    Mixed seps opts <- getRecord "Align"
+    opts <- getRecord "Align"
     let alignOpts = A.AlignOptions
             { prefix      = unHelpful $ before opts
             , suffix      = unHelpful $ after opts
-            , separators  = A.Separator . unHelpful <$> NE.toList seps
-            , stripAfter  = fromMaybe False $ unHelpful (strip opts) <|> unHelpful (stripAfter opts)
-            , stripBefore = fromMaybe False $ unHelpful (strip opts) <|> unHelpful (stripBefore opts)
+            , separators  = fmap A.Separator . unHelpful $ delimiter opts
+            , stripAfter  = unHelpful (strip opts) || unHelpful (stripAfter opts)
+            , stripBefore = unHelpful (strip opts) || unHelpful (stripBefore opts)
             }
     textLines <- T.lines <$> T.getContents
 
