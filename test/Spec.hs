@@ -56,3 +56,12 @@ tests = describe "Align.align" $ do
                        ]
         align (defaultOptions [Separator ","]){stripAfter = True, stripBefore=True} input
             `shouldBe` expected
+    it "Handle differet size delimiters" $ do
+        let input = [ "hello,a,b,c,d"
+                    , "hej->ho->baby->bo"
+                    ]
+            expected = [ "hello ,a  ,b    ,c ,d"
+                       , "hej  ->ho->baby->bo"
+                       ]
+        align (defaultOptions [Separator ",", Separator "->"]) input
+            `shouldBe` expected
