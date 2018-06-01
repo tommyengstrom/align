@@ -64,9 +64,10 @@ textChunk opts = fmap (TextBlock . T.pack) $ manyTill anyChar findDelim
 afterLast :: Parsec Void Text Piece
 afterLast = TextBlock <$> takeRest
 
-reconstruct :: Maybe Text -> Maybe Text -> [Offset] -> [Piece] -> Text
-reconstruct mBefore mAfter offsets = T.stripEnd . T.concat . f 0 offsets
+reconstruct :: [Separator] -> Maybe Text -> Maybe Text -> [Offset] -> [Piece] -> Text
+reconstruct seps mBefore mAfter offsets = T.stripEnd . T.concat . f 0 offsets
     where
+        maxDelimLength = foldl max 0 (fmap (T.length . unSeparator) seps)
         after  = fromMaybe "" mAfter
         before = fromMaybe "" mBefore
 
@@ -76,8 +77,10 @@ reconstruct mBefore mAfter offsets = T.stripEnd . T.concat . f 0 offsets
         f pos delimOffsets (TextBlock t:ps) = t : f (T.length t + pos) delimOffsets ps
         f pos (Offset o:os) (Delim t: ps)   =
             let extraSpaces = o - pos
-                toInsert = T.replicate extraSpaces " " <> before <> t <> after
-             in toInsert : f (pos + extraSpaces +1 ) os ps
+                delimLeftOver = T.replicate (maxDelimLength - delimLength) " "
+                delimLength = T.length t
+                toInsert = T.replicate extraSpaces " " <> before <> t <> delimLeftOver <> after
+             in toInsert : f (pos + extraSpaces + 1) os ps
 
 pieceToText :: Piece -> Text
 pieceToText (TextBlock t) = t
@@ -109,7 +112,7 @@ maxOffsets os = case maxOffset of
 
 
 align :: AlignOptions -> [Text] -> [Text]
-align opts ts = fmap (reconstruct (prefix opts) (suffix opts) offsets) rows
+align opts ts = fmap (reconstruct (separators opts) (prefix opts) (suffix opts) offsets) rows
     where
         rows :: [[Piece]]
         rows = parseRows opts ts
