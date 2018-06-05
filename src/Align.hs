@@ -64,35 +64,49 @@ textChunk opts = fmap (TextBlock . T.pack) $ manyTill anyChar findDelim
 afterLast :: Parsec Void Text Piece
 afterLast = TextBlock <$> takeRest
 
-reconstruct :: [Separator] -> Maybe Text -> Maybe Text -> [Offset] -> [Piece] -> Text
-reconstruct seps mBefore mAfter offsets = T.stripEnd . T.concat . f 0 offsets
+reconstruct :: AlignOptions -> [[Piece]] -> [Text]
+reconstruct opts rows = fmap (T.stripEnd . T.concat . toSizedChunks 0 offsets) rows
     where
-        maxDelimLength = foldl max 0 (fmap (T.length . unSeparator) seps)
-        after  = fromMaybe "" mAfter
-        before = fromMaybe "" mBefore
-
-        f :: Int -> [Offset] -> [Piece] -> [Text]
-        f _ _ [] = []
-        f _ [] ps = fmap pieceToText ps
-        f pos delimOffsets (TextBlock t:ps) = t : f (T.length t + pos) delimOffsets ps
-        f pos (Offset o:os) (Delim t: ps)   =
-            let extraSpaces = o - pos
-                delimLeftOver = T.replicate (maxDelimLength - delimLength) " "
+        -- Turn the pieces into a list of text chunk of the correct size
+        toSizedChunks :: Int -> [Offset] -> [Piece] -> [Text]
+        toSizedChunks _ _ [] = []
+        toSizedChunks _ [] ps = fmap pieceToText ps
+        toSizedChunks pos delimOffsets (TextBlock t:ps) =
+            t : toSizedChunks (T.length t + pos) delimOffsets ps
+        toSizedChunks pos (Offset o:os) (Delim t: ps)   =
+            let -- Make sure the column starts at the right place
+                leadingSpaces = T.replicate (o - pos) " "
+                -- Fill with spaces if operator is shorter than the longest
+                trailingSpaces = T.replicate (maxDelimLength - delimLength) " "
                 delimLength = T.length t
-                toInsert = T.replicate extraSpaces " " <> before <> t <> delimLeftOver <> after
-             in toInsert : f (pos + extraSpaces + 1) os ps
+                toInsert = leadingSpaces <> before <> t <> trailingSpaces <> after
+             in toInsert : toSizedChunks (pos + T.length toInsert) os ps
+
+        maxDelimLength :: Int
+        maxDelimLength = foldl max 0 (fmap (T.length . unSeparator) $ separators opts)
+
+        offsets :: [Offset]
+        offsets = maxOffsets $ fmap (delimiterOffsets maxDelimLength) rows
+
+        after :: Text
+        after = fromMaybe "" $ suffix opts
+
+        before :: Text
+        before = fromMaybe "" $ prefix opts
 
 pieceToText :: Piece -> Text
 pieceToText (TextBlock t) = t
 pieceToText (Delim t)     = t
 
-delimiterOffsets :: [Piece] -> [Offset]
-delimiterOffsets = f 0
+-- | Calculate the offset of each text chunk, not including the width of the delimiter
+delimiterOffsets :: Int -> [Piece] -> [Offset]
+delimiterOffsets maxDelimLength = f 0
     where
+
         f :: Int -> [Piece] -> [Offset]
         f _ []                 = []
         f pos (TextBlock t:ss) = f (pos + T.length t) ss
-        f pos (Delim t   :ss)  = Offset pos : f (pos + T.length t) ss
+        f pos (Delim _   :ss)  = Offset pos : f (pos + maxDelimLength) ss
 
 maxOffsets :: [[Offset]] -> [Offset]
 maxOffsets os = case maxOffset of
@@ -112,13 +126,7 @@ maxOffsets os = case maxOffset of
 
 
 align :: AlignOptions -> [Text] -> [Text]
-align opts ts = fmap (reconstruct (separators opts) (prefix opts) (suffix opts) offsets) rows
-    where
-        rows :: [[Piece]]
-        rows = parseRows opts ts
-
-        offsets :: [Offset]
-        offsets = maxOffsets $ fmap delimiterOffsets rows
+align opts = reconstruct opts . parseRows opts
 
 parseRows :: AlignOptions -> [Text] -> [[Piece]]
 parseRows opts = rights . fmap (parseRow opts)

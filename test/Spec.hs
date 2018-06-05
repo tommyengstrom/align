@@ -60,7 +60,7 @@ tests = describe "Align.align" $ do
         let input = [ "hello,a,b,c,d"
                     , "hej->ho->baby->bo"
                     ]
-            expected = [ "hello, a , b   , c ,d"
+            expected = [ "hello, a , b   , c , d"
                        , "hej  ->ho->baby->bo"
                        ]
         align (defaultOptions [Separator ",", Separator "->"]) input
