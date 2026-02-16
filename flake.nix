@@ -10,8 +10,11 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        align = pkgs.haskell.packages.ghc9103.callCabal2nix "align" ./. {};
       in
       {
+        packages.default = align;
+
         devShells.default = pkgs.mkShell {
           buildInputs = [
             pkgs.haskell.compiler.ghc9103
